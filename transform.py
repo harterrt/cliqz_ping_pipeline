@@ -1,7 +1,7 @@
 import ujson as json
 from datetime import *
 import pandas as pd
-from pyspark.sql.types import StructField, StructType
+from pyspark.sql.types import * #StructField, StructType
 
 from moztelemetry import get_pings_properties
 from moztelemetry.dataset import Dataset
@@ -19,7 +19,7 @@ class DataFrameConfig:
         self.columns = [ColumnConfig(*col) for col in col_configs]
 
     def toStructType(self):
-        StructType(map(
+        return StructType(map(
             lambda col: StructField(col.name, col.struct_type, True),
             self.columns))
 
@@ -31,7 +31,7 @@ class DataFrameConfig:
 
 
 
-def pings_to_df(pings, data_frame_config):
+def pings_to_df(sqlContext, pings, data_frame_config):
     """Performs simple data pipelining on raw pings
 
     Arguments:
@@ -56,20 +56,26 @@ def pings_to_df(pings, data_frame_config):
         filtered_pings.map(ping_to_row),
         schema = data_frame_config.toStructType())
 
-def __main__():
+def __main__(sc, sqlContext):
+    yesterday = (date.today() - timedelta(1)).strftime("%Y%m%d")
     get_doctype_pings = lambda docType: Dataset.from_source("telemetry") \
         .where(docType=docType) \
         .where(submissionDate=yesterday) \
         .where(appName="Firefox") \
         .records(sc)
 
-    df_config = DataFrameConfig([
+    testpilot_config = DataFrameConfig([
         ("client_id", "clientId", None, StringType()),
         ("submission_date", "meta/submissionDate", None, StringType()),
         ("creation_date", "creationDate", None, StringType()),
-        #("events", "payload/events", None, StringType())
+        ("events", "payload/events", None, ArrayType(MapType(StringType(), StringType())))
     ])
 
-    return (get_doctype_pings, df_config)
+    return pings_to_df(
+        sqlContext,
+        get_doctype_pings("testpilot"),
+        testpilot_config)
 
-
+def save_df(df, day):
+    path = "s3n://telemetry-parquet/harter/cliqz/v1/submission={}".format(day)
+    df.coalesce(1).write.mode("overwrite").parquet(path)
