@@ -69,7 +69,9 @@ def __main__(sc, sqlContext):
         .where(appName="Firefox") \
         .records(sc)
 
-    get_cliqz_version = lambda x: x["testpilot@cliqz.com"]["version"] if "testpilot@cliqz.com" in x.keys() else None
+    get_cliqz_version = lambda x: x["testpilot@cliqz.com"]["version"] if x is not None and "testpilot@cliqz.com" in x.keys() else None
+    has_addon = lambda x: "testpilot@cliqz.com" in x.keys() if x is not None else None
+    get_event = lambda x: x[0]["event"] if x is not None else None
 
     testpilot_df = pings_to_df(
         sqlContext,
@@ -83,22 +85,20 @@ def __main__(sc, sqlContext):
             ("channel", "meta/normalizedChannel", None, StringType()),
             ("os", "meta/os", None, StringType()),
             ("telemetry_enabled", "environment/settings/telemetryEnabled", None, BooleanType()),
-            ("has_addon", "environment/addons/activeAddons", lambda x: "testpilot@cliqz.com" in x.keys(), StringType()),
+            ("has_addon", "environment/addons/activeAddons", has_addon, StringType()),
             ("addons", "environment/addons/activeAddons", None, StringType()),
             ("cliqz_version", "environment/addons/activeAddons", get_cliqz_version, StringType()),
-            ("event", "payload/events", lambda x: x[0]["event"], StringType()),
-            ("events", "payload/events", None, ArrayType(MapType(StringType(), StringType())))
+            #("events", "payload/events", None, ArrayType(MapType(StringType(), StringType()))),
+            ("event", "payload/events", get_event, StringType())
         ])
     )
-
-    has_addon = lambda x: "testpilot@cliqz.com" in x.keys() if x is not None else None
 
     testpilottest_df = pings_to_df(
         sqlContext,
         get_doctype_pings("testpilottest"),
         DataFrameConfig([
             ("client_id", "clientId", None, StringType()),
-            ("cliqz_client_id", "payload/payload/cliqzSession"), None, StringType()),
+            ("cliqz_client_id", "payload/payload/cliqzSession", None, StringType()),
             ("session_id", "payload/payload/sessionId", None, StringType()),
             ("subsession_id", "payload/payload/subsessionId", None, StringType()),
             ("date", "meta/submissionDate", None, StringType()),
@@ -109,7 +109,7 @@ def __main__(sc, sqlContext):
             ("os", "meta/os", None, StringType()),
             ("telemetry_enabled", "environment/settings/telemetryEnabled", None, StringType()),
             ("has_addon", "environment/addons/activeAddons", has_addon, StringType()),
-            ("cliqz_version", "environment/addons/activeAddons", get_cliqz_version, None, StringType()),
+            ("cliqz_version", "environment/addons/activeAddons", get_cliqz_version, StringType()),
             ("event", "payload/payload/event", None, StringType()),
             ("content_search_engine", "payload/payload/contentSearch", None, StringType())
         ])
