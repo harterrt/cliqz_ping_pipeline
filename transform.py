@@ -1,7 +1,8 @@
 import ujson as json
 from datetime import *
 import pandas as pd
-from pyspark.sql.types import * #StructField, StructType
+from pyspark.sql.types import *
+from pyspark.sql.functions import split
 
 from moztelemetry import get_pings_properties
 from moztelemetry.dataset import Dataset
@@ -58,9 +59,12 @@ def pings_to_df(sqlContext, pings, data_frame_config):
 
 def save_df(df, name, date_partition, partitions=1):
     if date_partition is not None:
-        partition_str = "/submission={day}".format(day=day)
+        partition_str = "/submission={day}".format(day=date_partition)
+    else:
+        partition_str=""
 
-    path_fmt = "s3n://telemetry-parquet/harter/cliqz_{name}/v1{partition_srt}"
+
+    path_fmt = "s3n://telemetry-parquet/harter/cliqz_{name}/v1{partition_str}"
     path = path_fmt.format(name=name, partition_str=partition_str)
     df.coalesce(partitions).write.mode("overwrite").parquet(path)
 
