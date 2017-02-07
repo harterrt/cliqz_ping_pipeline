@@ -64,6 +64,7 @@ def save_df(df, name, date_partition, partitions=1):
         partition_str=""
 
 
+    # Choose cliqz_{name} over cliqz/{name} b.c. path now matches presto table name
     path_fmt = "s3n://telemetry-parquet/harter/cliqz_{name}/v1{partition_str}"
     path = path_fmt.format(name=name, partition_str=partition_str)
     df.coalesce(partitions).write.mode("overwrite").parquet(path)
