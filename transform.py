@@ -82,7 +82,6 @@ def __main__(sc, sqlContext):
         get_doctype_pings("testpilot"),
         DataFrameConfig([
             ("client_id", "clientId", None, StringType()),
-            ("submission_date", "meta/submissionDate", None, StringType()),
             ("creation_date", "creationDate", None, StringType()),
             ("geo", "meta/geoCountry", None, StringType()),
             ("locale", "environment/settings/locale", None, StringType()),
