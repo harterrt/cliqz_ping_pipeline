@@ -121,7 +121,7 @@ def __main__(sc, sqlContext):
         ])).filter("event IS NOT NULL") \
            .filter("test = 'testpilot@cliqz.com'")
 
-    save_df(testpilottest_df, "testpilottest", yesterday, partitions=160)
+    save_df(testpilottest_df, "testpilottest", yesterday, partitions=32)
 
     search_df = sqlContext.read.options(header=True) \
         .csv("s3://net-mozaws-prod-cliqz/testpilot-cliqz-telemetry.csv") \
