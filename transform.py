@@ -69,11 +69,14 @@ def save_df(df, name, date_partition, partitions=1):
     path = path_fmt.format(name=name, partition_str=partition_str)
     df.coalesce(partitions).write.mode("overwrite").parquet(path)
 
-def __main__(sc, sqlContext):
-    yesterday = (date.today() - timedelta(1)).strftime("%Y%m%d")
+def __main__(sc, sqlContext, day=None):
+    if day is none
+        # Set day to yesterday
+        day = (date.today() - timedelta(1)).strftime("%Y%m%d")
+
     get_doctype_pings = lambda docType: Dataset.from_source("telemetry") \
         .where(docType=docType) \
-        .where(submissionDate=yesterday) \
+        .where(submissionDate=day) \
         .where(appName="Firefox") \
         .records(sc)
 
@@ -101,7 +104,7 @@ def __main__(sc, sqlContext):
         ])).filter("test = '@testpilot-addon'") \
            .filter("event_object = 'testpilot@cliqz.com'")
 
-    save_df(testpilot_df, "testpilot", yesterday)
+    save_df(testpilot_df, "testpilot", day)
 
     testpilottest_df = pings_to_df(
         sqlContext,
@@ -126,7 +129,7 @@ def __main__(sc, sqlContext):
         ])).filter("event IS NOT NULL") \
            .filter("test = 'testpilot@cliqz.com'")
 
-    save_df(testpilottest_df, "testpilottest", yesterday, partitions=32)
+    save_df(testpilottest_df, "testpilottest", day, partitions=32)
 
     search_df = sqlContext.read.options(header=True) \
         .csv("s3://net-mozaws-prod-cliqz/testpilot-cliqz-telemetry.csv") \
