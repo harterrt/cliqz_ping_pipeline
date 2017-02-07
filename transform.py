@@ -56,10 +56,10 @@ def pings_to_df(sqlContext, pings, data_frame_config):
         filtered_pings.map(ping_to_row),
         schema = data_frame_config.toStructType())
 
-def save_df(df, name, day):
+def save_df(df, name, day, partitions=1):
     path_fmt = "s3n://telemetry-parquet/harter/cliqz_{name}/v1/submission={day}"
-    path = path_fmt.format({'day':day, 'name':name})
-    df.coalesce(1).write.mode("overwrite").parquet(path)
+    path = path_fmt.format(day=day, name=name)
+    df.coalesce(partitions).write.mode("overwrite").parquet(path)
 
 def __main__(sc, sqlContext):
     yesterday = (date.today() - timedelta(1)).strftime("%Y%m%d")
@@ -72,6 +72,7 @@ def __main__(sc, sqlContext):
     get_cliqz_version = lambda x: x["testpilot@cliqz.com"]["version"] if x is not None and "testpilot@cliqz.com" in x.keys() else None
     has_addon = lambda x: "testpilot@cliqz.com" in x.keys() if x is not None else None
     get_event = lambda x: x[0]["event"] if x is not None else None
+    get_event_object = lambda x: x[0]["object"] if x is not None else None
 
     testpilot_df = pings_to_df(
         sqlContext,
@@ -86,12 +87,14 @@ def __main__(sc, sqlContext):
             ("os", "meta/os", None, StringType()),
             ("telemetry_enabled", "environment/settings/telemetryEnabled", None, BooleanType()),
             ("has_addon", "environment/addons/activeAddons", has_addon, StringType()),
-            ("addons", "environment/addons/activeAddons", None, StringType()),
             ("cliqz_version", "environment/addons/activeAddons", get_cliqz_version, StringType()),
-            #("events", "payload/events", None, ArrayType(MapType(StringType(), StringType()))),
-            ("event", "payload/events", get_event, StringType())
-        ])
-    )
+            ("event", "payload/events", get_event, StringType()),
+            ("event_object", "payload/events", get_event_object, StringType()),
+            ("test", "payload/test", None, StringType())
+        ])).filter("test = '@testpilot-addon'") \
+           .filter("event_object = 'testpilot@cliqz.com'")
+
+    save_df(testpilot_df, "testpilot", yesterday)
 
     testpilottest_df = pings_to_df(
         sqlContext,
@@ -111,8 +114,11 @@ def __main__(sc, sqlContext):
             ("has_addon", "environment/addons/activeAddons", has_addon, StringType()),
             ("cliqz_version", "environment/addons/activeAddons", get_cliqz_version, StringType()),
             ("event", "payload/payload/event", None, StringType()),
-            ("content_search_engine", "payload/payload/contentSearch", None, StringType())
-        ])
-    )
+            ("content_search_engine", "payload/payload/contentSearch", None, StringType()),
+            ("test", "payload/test", None, StringType())
+        ])).filter("event IS NOT NULL") \
+           .filter("test = 'testpilot@cliqz.com'")
+
+    save_df(testpilottest_df, "testpilottest", yesterday, partitions=160)
 
     return testpilot_df, testpilottest_df
