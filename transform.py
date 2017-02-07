@@ -56,9 +56,12 @@ def pings_to_df(sqlContext, pings, data_frame_config):
         filtered_pings.map(ping_to_row),
         schema = data_frame_config.toStructType())
 
-def save_df(df, name, day, partitions=1):
-    path_fmt = "s3n://telemetry-parquet/harter/cliqz_{name}/v1/submission={day}"
-    path = path_fmt.format(day=day, name=name)
+def save_df(df, name, date_partition, partitions=1):
+    if date_partition is not None:
+        partition_str = "/submission={day}".format(day=day)
+
+    path_fmt = "s3n://telemetry-parquet/harter/cliqz_{name}/v1{partition_srt}"
+    path = path_fmt.format(name=name, partition_str=partition_str)
     df.coalesce(partitions).write.mode("overwrite").parquet(path)
 
 def __main__(sc, sqlContext):
@@ -121,4 +124,10 @@ def __main__(sc, sqlContext):
 
     save_df(testpilottest_df, "testpilottest", yesterday, partitions=160)
 
-    return testpilot_df, testpilottest_df
+    search_df = sqlContext.read.options(header=True) \
+        .csv("s3://net-mozaws-prod-cliqz/testpilot-cliqz-telemetry.csv") \
+        .withColumn("id", split("udid", "\|")[0]) # Add ID column
+
+    save_df(search_df, "search", None)
+
+    return testpilot_df, testpilottest_df, search_df
