@@ -3,6 +3,8 @@ from datetime import *
 import pandas as pd
 from pyspark.sql.types import *
 from pyspark.sql.functions import split
+import base64
+from Crypto.Cipher import AES
 
 from moztelemetry import get_pings_properties
 from moztelemetry.dataset import Dataset
@@ -69,8 +71,8 @@ def save_df(df, name, date_partition, partitions=1):
     path = path_fmt.format(name=name, partition_str=partition_str)
     df.coalesce(partitions).write.mode("overwrite").parquet(path)
 
-def __main__(sc, sqlContext, day=None):
-    if day is none
+def __main__(sc, sqlContext, day=None, save=True):
+    if day is None:
         # Set day to yesterday
         day = (date.today() - timedelta(1)).strftime("%Y%m%d")
 
@@ -80,6 +82,18 @@ def __main__(sc, sqlContext, day=None):
         .where(appName="Firefox") \
         .records(sc)
 
+    KEY = sc.textFile("s3://telemetry-parquet/harter/cliqz_key").take(1)[0]
+    def decrypt_cliqz_id(cliqz_id, key=KEY):
+        if cliqz_id is not None:
+            secret = AES.new(key)
+            try:
+                return secret.decrypt(base64.b64decode(cliqz_id)).rstrip("\0")
+            except ValueError:
+                return None
+        else:
+            return None
+
+    split_cliqz_id = lambda x: decrypt_cliqz_id(x).split("|")[0] if x is not None else None
     get_cliqz_version = lambda x: x["testpilot@cliqz.com"]["version"] if x is not None and "testpilot@cliqz.com" in x.keys() else None
     has_addon = lambda x: "testpilot@cliqz.com" in x.keys() if x is not None else None
     get_event = lambda x: x[0]["event"] if x is not None else None
@@ -104,14 +118,16 @@ def __main__(sc, sqlContext, day=None):
         ])).filter("test = '@testpilot-addon'") \
            .filter("event_object = 'testpilot@cliqz.com'")
 
-    save_df(testpilot_df, "testpilot", day)
+    if save:
+        save_df(testpilot_df, "testpilot", day)
 
     testpilottest_df = pings_to_df(
         sqlContext,
         get_doctype_pings("testpilottest"),
         DataFrameConfig([
             ("client_id", "clientId", None, StringType()),
-            ("cliqz_client_id", "payload/payload/cliqzSession", None, StringType()),
+            ("cliqz_udid", "payload/payload/cliqzSession", decrypt_cliqz_id, StringType()),
+            ("cliqz_client_id", "payload/payload/cliqzSession", split_cliqz_id, StringType()),
             ("session_id", "payload/payload/sessionId", None, StringType()),
             ("subsession_id", "payload/payload/subsessionId", None, StringType()),
             ("date", "meta/submissionDate", None, StringType()),
@@ -129,12 +145,14 @@ def __main__(sc, sqlContext, day=None):
         ])).filter("event IS NOT NULL") \
            .filter("test = 'testpilot@cliqz.com'")
 
-    save_df(testpilottest_df, "testpilottest", day, partitions=32)
+    if save:
+        save_df(testpilottest_df, "testpilottest", day, partitions=32)
 
     search_df = sqlContext.read.options(header=True) \
         .csv("s3://net-mozaws-prod-cliqz/testpilot-cliqz-telemetry.csv") \
         .withColumn("id", split("udid", "\|")[0]) # Add ID column
 
-    save_df(search_df, "search", None)
+    if save:
+        save_df(search_df, "search", None)
 
     return testpilot_df, testpilottest_df, search_df
