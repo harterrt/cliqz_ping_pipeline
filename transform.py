@@ -88,12 +88,15 @@ def __main__(sc, sqlContext, day=None, save=True):
             secret = AES.new(key)
             try:
                 return secret.decrypt(base64.b64decode(cliqz_id)).rstrip("\0")
-            except ValueError:
+            except:
                 return None
         else:
             return None
 
-    split_cliqz_id = lambda x: decrypt_cliqz_id(x).split("|")[0] if x is not None else None
+    def split_cliqz_id(cliqz_id):
+        decrypted = decrypt_cliqz_id(cliqz_id)
+        return decrypted.split("|")[0] if decrypted is not None else None
+
     get_cliqz_version = lambda x: x["testpilot@cliqz.com"]["version"] if x is not None and "testpilot@cliqz.com" in x.keys() else None
     has_addon = lambda x: "testpilot@cliqz.com" in x.keys() if x is not None else None
     get_event = lambda x: x[0]["event"] if x is not None else None
@@ -126,6 +129,7 @@ def __main__(sc, sqlContext, day=None, save=True):
         get_doctype_pings("testpilottest"),
         DataFrameConfig([
             ("client_id", "clientId", None, StringType()),
+            ("enc_cliqz_udid", "payload/payload/cliqzSession", None, StringType()),
             ("cliqz_udid", "payload/payload/cliqzSession", decrypt_cliqz_id, StringType()),
             ("cliqz_client_id", "payload/payload/cliqzSession", split_cliqz_id, StringType()),
             ("session_id", "payload/payload/sessionId", None, StringType()),
