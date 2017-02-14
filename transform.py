@@ -41,6 +41,17 @@ def pings_to_df(sqlContext, pings, data_frame_config):
         data_frame_config: a list of tuples of the form:
                  (name, path, cleaning_func, column_type)
     """
+    filtered_pings = get_pings_properties(pings, data_frame_config.get_paths())
+
+    return config_to_df(sqlContext, filtered_pings, data_frame_config)
+
+def config_to_df(sqlContext, raw_data, data_frame_config):
+    """Performs simple data pipelining on raw pings
+
+    Arguments:
+        data_frame_config: a list of tuples of the form:
+                 (name, path, cleaning_func, column_type)
+    """
     def build_cell(ping, column_config):
         """Takes a json ping and a column config and returns a cleaned cell"""
         raw_value = ping[column_config.path]
@@ -52,8 +63,6 @@ def pings_to_df(sqlContext, pings, data_frame_config):
 
     def ping_to_row(ping):
         return [build_cell(ping, col) for col in data_frame_config.columns]
-
-    filtered_pings = get_pings_properties(pings, data_frame_config.get_paths())
 
     return sqlContext.createDataFrame(
         filtered_pings.map(ping_to_row),
@@ -150,11 +159,32 @@ def __main__(sc, sqlContext, day=None, save=True):
            .filter("test = 'testpilot@cliqz.com'")
 
     if save:
-        save_df(testpilottest_df, "testpilottest", day, partitions=32)
+        save_df(testpilottest_df, "testpilottest", day, partitions=16*5)
 
-    search_df = sqlContext.read.options(header=True) \
-        .csv("s3://net-mozaws-prod-cliqz/testpilot-cliqz-telemetry.csv") \
-        .withColumn("id", split("udid", "\|")[0]) # Add ID column
+    search_df = config_to_df(
+        sqlContext,
+        sqlContext.read.options(header=True) \
+            .csv("s3://net-mozaws-prod-cliqz/testpilot-cliqz-telemetry.csv"),
+        DataFrameConfig([
+            ("client_id_cliqz", "udid", lambda x: x.split('\|')[0], StringType()),
+            ("date", "start_time", None, StringType()),
+            ("is_search", "selection_type", lambda x: x in ["query", "enter", "click"], BooleanType()),
+            ("entry_point", "entry_point", None, StringType()),
+            ("num_cliqz_results_shown", "final_result_list_backend_result_count", None, IntegerType()),
+            ("were_browser_results_shown", "final_result_list_contains_history", None, BooleanType()),
+            ("final_query_length", "selection_query_length", None, IntegerType()),
+            ("landing_type", "selection_type", None, StringType()),
+            ("landing_rich_type", "selection_class", None, StringType()),
+            ("landed_on_inner_link", "selection_element", None, BooleanType()),
+            ("landing_position", "selection_index", None, IntegerType()),
+            ("autocompleted", "selection_type", lambda x: x == "autocomplete", BooleanType()),
+            ("navigated_to_search_page", "selection_type", lambda x: x == "query", BooleanType()),
+            ("count", "total_signal_count", None, IntegerType()),
+            ("selection_time", "selection_time", None, IntegerType()),
+            ("final_result_list_show_time", "final_result_list_show_time", None, IntegerType()),
+            ("selection_source", "selection_source", None, StringType())
+        ])
+    )
 
     if save:
         save_df(search_df, "search", None)
