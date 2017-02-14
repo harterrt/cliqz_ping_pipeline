@@ -65,7 +65,7 @@ def config_to_df(sqlContext, raw_data, data_frame_config):
         return [build_cell(ping, col) for col in data_frame_config.columns]
 
     return sqlContext.createDataFrame(
-        filtered_pings.map(ping_to_row),
+        raw_data.map(ping_to_row),
         schema = data_frame_config.toStructType())
 
 def save_df(df, name, date_partition, partitions=1):
@@ -161,27 +161,36 @@ def __main__(sc, sqlContext, day=None, save=True):
     if save:
         save_df(testpilottest_df, "testpilottest", day, partitions=16*5)
 
+    def try_convert(conv_func, value):
+        try:
+            return conv_func(value)
+        except:
+            return None
+
+    to_bool = lambda x: try_convert(bool, x)
+    to_int = lambda x: try_convert(int, x)
+
     search_df = config_to_df(
         sqlContext,
         sqlContext.read.options(header=True) \
-            .csv("s3://net-mozaws-prod-cliqz/testpilot-cliqz-telemetry.csv"),
+            .csv("s3://net-mozaws-prod-cliqz/testpilot-cliqz-telemetry.csv").rdd,
         DataFrameConfig([
             ("client_id_cliqz", "udid", lambda x: x.split('\|')[0], StringType()),
             ("date", "start_time", None, StringType()),
             ("is_search", "selection_type", lambda x: x in ["query", "enter", "click"], BooleanType()),
             ("entry_point", "entry_point", None, StringType()),
-            ("num_cliqz_results_shown", "final_result_list_backend_result_count", None, IntegerType()),
-            ("were_browser_results_shown", "final_result_list_contains_history", None, BooleanType()),
-            ("final_query_length", "selection_query_length", None, IntegerType()),
+            ("num_cliqz_results_shown", "final_result_list_backend_result_count", to_int, IntegerType()),
+            ("were_browser_results_shown", "final_result_list_contains_history", to_bool, BooleanType()),
+            ("final_query_length", "selection_query_length", to_int, IntegerType()),
             ("landing_type", "selection_type", None, StringType()),
             ("landing_rich_type", "selection_class", None, StringType()),
-            ("landed_on_inner_link", "selection_element", None, BooleanType()),
-            ("landing_position", "selection_index", None, IntegerType()),
+            ("landed_on_inner_link", "selection_element", to_bool, BooleanType()),
+            ("landing_position", "selection_index", to_int, IntegerType()),
             ("autocompleted", "selection_type", lambda x: x == "autocomplete", BooleanType()),
             ("navigated_to_search_page", "selection_type", lambda x: x == "query", BooleanType()),
-            ("count", "total_signal_count", None, IntegerType()),
-            ("selection_time", "selection_time", None, IntegerType()),
-            ("final_result_list_show_time", "final_result_list_show_time", None, IntegerType()),
+            ("count", "total_signal_count", to_int, IntegerType()),
+            ("selection_time", "selection_time", to_int, IntegerType()),
+            ("final_result_list_show_time", "final_result_list_show_time", to_int, IntegerType()),
             ("selection_source", "selection_source", None, StringType())
         ])
     )
