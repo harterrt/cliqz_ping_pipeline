@@ -9,7 +9,6 @@ from Crypto.Cipher import AES
 from moztelemetry import get_pings_properties
 from moztelemetry.dataset import Dataset
 
-
 class ColumnConfig:
     def __init__(self, name, path, cleaning_func, struct_type):
         self.name = name
@@ -18,8 +17,9 @@ class ColumnConfig:
         self.struct_type = struct_type
 
 class DataFrameConfig:
-    def __init__(self, col_configs):
+    def __init__(self, col_configs, ping_filter):
         self.columns = [ColumnConfig(*col) for col in col_configs]
+        self.ping_filter = ping_filter
 
     def toStructType(self):
         return StructType(map(
@@ -33,7 +33,6 @@ class DataFrameConfig:
         return map(lambda col: col.path, self.columns)
 
 
-
 def pings_to_df(sqlContext, pings, data_frame_config):
     """Performs simple data pipelining on raw pings
 
@@ -41,7 +40,8 @@ def pings_to_df(sqlContext, pings, data_frame_config):
         data_frame_config: a list of tuples of the form:
                  (name, path, cleaning_func, column_type)
     """
-    filtered_pings = get_pings_properties(pings, data_frame_config.get_paths())
+    filtered_pings = get_pings_properties(pings, data_frame_config.get_paths())\
+        .filter(data_frame_config.ping_filter)
 
     return config_to_df(sqlContext, filtered_pings, data_frame_config)
 
@@ -65,7 +65,7 @@ def config_to_df(sqlContext, raw_data, data_frame_config):
         return [build_cell(ping, col) for col in data_frame_config.columns]
 
     return sqlContext.createDataFrame(
-        raw_data.map(ping_to_row),
+        raw_data.map(ping_to_row).collect(),
         schema = data_frame_config.toStructType())
 
 def save_df(df, name, date_partition, partitions=1):
@@ -76,9 +76,9 @@ def save_df(df, name, date_partition, partitions=1):
 
 
     # Choose cliqz_{name} over cliqz/{name} b.c. path now matches presto table name
-    path_fmt = "s3n://telemetry-parquet/harter/cliqz_{name}/v1{partition_str}"
+    path_fmt = "s3a://telemetry-parquet/harter/cliqz_{name}/v1{partition_str}"
     path = path_fmt.format(name=name, partition_str=partition_str)
-    df.coalesce(partitions).write.mode("overwrite").parquet(path)
+    df.repartition(partitions).write.mode("overwrite").parquet(path)
 
 def __main__(sc, sqlContext, day=None, save=True):
     if day is None:
@@ -114,21 +114,24 @@ def __main__(sc, sqlContext, day=None, save=True):
     testpilot_df = pings_to_df(
         sqlContext,
         get_doctype_pings("testpilot"),
-        DataFrameConfig([
-            ("client_id", "clientId", None, StringType()),
-            ("creation_date", "creationDate", None, StringType()),
-            ("geo", "meta/geoCountry", None, StringType()),
-            ("locale", "environment/settings/locale", None, StringType()),
-            ("channel", "meta/normalizedChannel", None, StringType()),
-            ("os", "meta/os", None, StringType()),
-            ("telemetry_enabled", "environment/settings/telemetryEnabled", None, BooleanType()),
-            ("has_addon", "environment/addons/activeAddons", has_addon, BooleanType()),
-            ("cliqz_version", "environment/addons/activeAddons", get_cliqz_version, StringType()),
-            ("event", "payload/events", get_event, StringType()),
-            ("event_object", "payload/events", get_event_object, StringType()),
-            ("test", "payload/test", None, StringType())
-        ])).filter("test = '@testpilot-addon'") \
-           .filter("event_object = 'testpilot@cliqz.com'")
+        DataFrameConfig(
+            [
+                ("client_id", "clientId", None, StringType()),
+                ("creation_date", "creationDate", None, StringType()),
+                ("geo", "meta/geoCountry", None, StringType()),
+                ("locale", "environment/settings/locale", None, StringType()),
+                ("channel", "meta/normalizedChannel", None, StringType()),
+                ("os", "meta/os", None, StringType()),
+                ("telemetry_enabled", "environment/settings/telemetryEnabled", None, BooleanType()),
+                ("has_addon", "environment/addons/activeAddons", has_addon, BooleanType()),
+                ("cliqz_version", "environment/addons/activeAddons", get_cliqz_version, StringType()),
+                ("event", "payload/events", get_event, StringType()),
+                ("event_object", "payload/events", get_event_object, StringType()),
+                ("test", "payload/test", None, StringType())
+            ],
+            lambda ping: ping['payload/test'] == '@testpilot-addon'
+        )
+    ).filter("event_object = 'testpilot@cliqz.com'")
 
     if save:
         save_df(testpilot_df, "testpilot", day)
@@ -136,27 +139,30 @@ def __main__(sc, sqlContext, day=None, save=True):
     testpilottest_df = pings_to_df(
         sqlContext,
         get_doctype_pings("testpilottest"),
-        DataFrameConfig([
-            ("client_id", "clientId", None, StringType()),
-            ("enc_cliqz_udid", "payload/payload/cliqzSession", None, StringType()),
-            ("cliqz_udid", "payload/payload/cliqzSession", decrypt_cliqz_id, StringType()),
-            ("cliqz_client_id", "payload/payload/cliqzSession", split_cliqz_id, StringType()),
-            ("session_id", "payload/payload/sessionId", None, StringType()),
-            ("subsession_id", "payload/payload/subsessionId", None, StringType()),
-            ("date", "meta/submissionDate", None, StringType()),
-            ("client_timestamp", "creationDate", None, StringType()),
-            ("geo", "meta/geoCountry", None, StringType()),
-            ("locale", "environment/settings/locale", None, StringType()),
-            ("channel", "meta/normalizedChannel", None, StringType()),
-            ("os", "meta/os", None, StringType()),
-            ("telemetry_enabled", "environment/settings/telemetryEnabled", None, BooleanType()),
-            ("has_addon", "environment/addons/activeAddons", has_addon, BooleanType()),
-            ("cliqz_version", "environment/addons/activeAddons", get_cliqz_version, StringType()),
-            ("event", "payload/payload/event", None, StringType()),
-            ("content_search_engine", "payload/payload/contentSearch", None, StringType()),
-            ("test", "payload/test", None, StringType())
-        ])).filter("event IS NOT NULL") \
-           .filter("test = 'testpilot@cliqz.com'")
+        DataFrameConfig(
+            [
+                ("client_id", "clientId", None, StringType()),
+                ("enc_cliqz_udid", "payload/payload/cliqzSession", None, StringType()),
+                ("cliqz_udid", "payload/payload/cliqzSession", decrypt_cliqz_id, StringType()),
+                ("cliqz_client_id", "payload/payload/cliqzSession", split_cliqz_id, StringType()),
+                ("session_id", "payload/payload/sessionId", None, StringType()),
+                ("subsession_id", "payload/payload/subsessionId", None, StringType()),
+                ("date", "meta/submissionDate", None, StringType()),
+                ("client_timestamp", "creationDate", None, StringType()),
+                ("geo", "meta/geoCountry", None, StringType()),
+                ("locale", "environment/settings/locale", None, StringType()),
+                ("channel", "meta/normalizedChannel", None, StringType()),
+                ("os", "meta/os", None, StringType()),
+                ("telemetry_enabled", "environment/settings/telemetryEnabled", None, BooleanType()),
+                ("has_addon", "environment/addons/activeAddons", has_addon, BooleanType()),
+                ("cliqz_version", "environment/addons/activeAddons", get_cliqz_version, StringType()),
+                ("event", "payload/payload/event", None, StringType()),
+                ("content_search_engine", "payload/payload/contentSearch", None, StringType()),
+                ("test", "payload/test", None, StringType())
+            ],
+            lambda ping: ping['payload/test'] == "testpilot@cliqz.com"
+        )
+    ).filter("event IS NOT NULL")
 
     if save:
         save_df(testpilottest_df, "testpilottest", day, partitions=16*5)
@@ -192,7 +198,9 @@ def __main__(sc, sqlContext, day=None, save=True):
             ("selection_time", "selection_time", to_int, LongType()),
             ("final_result_list_show_time", "final_result_list_show_time", to_int, LongType()),
             ("selection_source", "selection_source", None, StringType())
-        ])
+            ],
+            lambda ping: True
+        )
     )
 
     if save:
