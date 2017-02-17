@@ -139,7 +139,7 @@ def prep_ms_agg(row):
         row,
         Counter({
             "is_default_browser_counter": Counter([row.is_default_browser]),
-            "session_hours": float(row.subsession_length)/3600,
+            "session_hours": float(row.subsession_length if row.subsession_length else 0)/3600,
             "search_counts": parse_search_counts(row.search_counts)
         })
     ))
@@ -262,7 +262,7 @@ final = joined.map(format_row)
 
 # In[71]:
 
-local_final = sqlContext.createDataFrame(final).coalesce(1).write.mode("overwrite")    .parquet("s3n://telemetry-parquet/harter/cliqz_profile_daily/v1/")
+local_final = sqlContext.createDataFrame(final.collect()).coalesce(1).write.mode("overwrite")    .parquet("s3n://telemetry-parquet/harter/cliqz_profile_daily/v1/")
 
 
 # # Optional Struct Type
