@@ -9,6 +9,17 @@
 # from moztelemetry import get_pings_properties
 # from moztelemetry.dataset import Dataset
 
+def save_df(df, name, date_partition, partitions=1):
+    if date_partition is not None:
+        partition_str = "/submission_date={day}".format(day=date_partition)
+    else:
+        partition_str=""
+
+    # TODO: this name should include the experiment name
+    path_fmt = "s3a://telemetry-parquet/harter/containers_{name}/v1{partition_str}"
+    path = path_fmt.format(name=name, partition_str=partition_str)
+    df.repartition(partitions).write.mode("overwrite").parquet(path)
+
 def __main__(sc, sqlContext, day=None, save=True):
     if day is None:
         # Set day to yesterday
@@ -20,52 +31,28 @@ def __main__(sc, sqlContext, day=None, save=True):
         .where(appName="Firefox") \
         .records(sc)
 
-    testpilot_df = pings_to_df(
-        sqlContext,
-        get_doctype_pings("testpilot"),
-        DataFrameConfig(
-            [
-                ("client_id", "clientId", None, StringType()),
-                ("creation_date", "creationDate", None, StringType()),
-                ("geo", "meta/geoCountry", None, StringType()),
-                ("locale", "environment/settings/locale", None, StringType()),
-                ("channel", "meta/normalizedChannel", None, StringType()),
-                ("os", "meta/os", None, StringType()),
-                ("telemetry_enabled", "environment/settings/telemetryEnabled", None, BooleanType()),
-                ("has_addon", "environment/addons/activeAddons", has_addon, BooleanType()),
-                ("cliqz_version", "environment/addons/activeAddons", get_cliqz_version, StringType()),
-                ("event", "payload/events", get_event, StringType()),
-                ("event_object", "payload/events", get_event_object, StringType()),
-                ("test", "payload/test", None, StringType())
-            ],
-            lambda ping: ping['payload/test'] == '@testpilot-addon'
-        )
-    ).filter("event_object = 'testpilot@cliqz.com'")
-
-    if save:
-        save_df(testpilot_df, "testpilot", day)
-
     testpilottest_df = pings_to_df(
         sqlContext,
         get_doctype_pings("testpilottest"),
         DataFrameConfig(
             [
-		("uuid", "payload.uuid", None, StringType()),
-		("userContextId", "payload.userContextId", None, LongType()),
-		("clickedContainerTabCount", "payload.clickedContainerTabCount", None, LongType()),
-		("eventSource", "payload.eventSource", None, StringType()),
-		("event", "payload.event", None, StringType()),
-		("hiddenContainersCount", "payload.hiddenContainersCount", None, LongType()),
-		("shownContainersCount", "payload.shownContainersCount", None, LongType()),
-		("totalContainersCount", "payload.totalContainersCount", None, LongType()),
-		("totalContainerTabsCount", "payload.totalContainerTabsCount", None, LongType()),
-		("totalNonContainerTabsCount", "payload.totalNonContainerTabsCount", None, LongType())
+                ("uuid", "payload/payload/uuid", None, StringType()),
+                ("userContextId", "payload/payload/userContextId", None, LongType()),
+                ("clickedContainerTabCount", "payload/payload/clickedContainerTabCount", None, LongType()),
+                ("eventSource", "payload/payload/eventSource", None, StringType()),
+                ("event", "payload/payload/event", None, StringType()),
+                ("hiddenContainersCount", "payload/payload/hiddenContainersCount", None, LongType()),
+                ("shownContainersCount", "payload/payload/shownContainersCount", None, LongType()),
+                ("totalContainersCount", "payload/payload/totalContainersCount", None, LongType()),
+                ("totalContainerTabsCount", "payload/payload/totalContainerTabsCount", None, LongType()),
+                ("totalNonContainerTabsCount", "payload/payload/totalNonContainerTabsCount", None, LongType()),
+                ("test", "payload/test", None, StringType()),
             ],
-            lambda ping: ping['payload/test'] == "testpilot@cliqz.com" # TODO FIX THIS FILTER
+            lambda ping: ping['payload/test'] == "@testpilot-containers"
         )
-    ).filter("event IS NOT NULL")
+    )
 
     if save:
         save_df(testpilottest_df, "testpilottest", day, partitions=16*5)
 
-    return testpilot_df, testpilottest_df, search_df
+    return testpilottest_df
