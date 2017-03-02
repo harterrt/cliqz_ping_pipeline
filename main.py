@@ -1,6 +1,5 @@
-import ujson as json
+from betl import *
 from datetime import *
-import pandas as pd
 from pyspark.sql.types import *
 from pyspark.sql.functions import split
 import base64
@@ -8,65 +7,6 @@ from Crypto.Cipher import AES
 
 from moztelemetry import get_pings_properties
 from moztelemetry.dataset import Dataset
-
-class ColumnConfig:
-    def __init__(self, name, path, cleaning_func, struct_type):
-        self.name = name
-        self.path = path
-        self.cleaning_func = cleaning_func
-        self.struct_type = struct_type
-
-class DataFrameConfig:
-    def __init__(self, col_configs, ping_filter):
-        self.columns = [ColumnConfig(*col) for col in col_configs]
-        self.ping_filter = ping_filter
-
-    def toStructType(self):
-        return StructType(map(
-            lambda col: StructField(col.name, col.struct_type, True),
-            self.columns))
-
-    def get_names(self):
-        return map(lambda col: col.name, self.columns)
-
-    def get_paths(self):
-        return map(lambda col: col.path, self.columns)
-
-
-def pings_to_df(sqlContext, pings, data_frame_config):
-    """Performs simple data pipelining on raw pings
-
-    Arguments:
-        data_frame_config: a list of tuples of the form:
-                 (name, path, cleaning_func, column_type)
-    """
-    filtered_pings = get_pings_properties(pings, data_frame_config.get_paths())\
-        .filter(data_frame_config.ping_filter)
-
-    return config_to_df(sqlContext, filtered_pings, data_frame_config)
-
-def config_to_df(sqlContext, raw_data, data_frame_config):
-    """Performs simple data pipelining on raw pings
-
-    Arguments:
-        data_frame_config: a list of tuples of the form:
-                 (name, path, cleaning_func, column_type)
-    """
-    def build_cell(ping, column_config):
-        """Takes a json ping and a column config and returns a cleaned cell"""
-        raw_value = ping[column_config.path]
-        func = column_config.cleaning_func
-        if func is not None:
-            return func(raw_value)
-        else:
-            return raw_value
-
-    def ping_to_row(ping):
-        return [build_cell(ping, col) for col in data_frame_config.columns]
-
-    return sqlContext.createDataFrame(
-        raw_data.map(ping_to_row).collect(),
-        schema = data_frame_config.toStructType())
 
 def save_df(df, name, date_partition, partitions=1):
     if date_partition is not None:
@@ -76,7 +16,7 @@ def save_df(df, name, date_partition, partitions=1):
 
 
     # Choose cliqz_{name} over cliqz/{name} b.c. path now matches presto table name
-    path_fmt = "s3a://telemetry-parquet/harter/cliqz_{name}/v1{partition_str}"
+    path_fmt = "s3n://telemetry-parquet/harter/cliqz_{name}/v1{partition_str}"
     path = path_fmt.format(name=name, partition_str=partition_str)
     df.repartition(partitions).write.mode("overwrite").parquet(path)
 
@@ -111,7 +51,7 @@ def __main__(sc, sqlContext, day=None, save=True):
     get_event = lambda x: x[0]["event"] if x is not None else None
     get_event_object = lambda x: x[0]["object"] if x is not None else None
 
-    testpilot_df = pings_to_df(
+    testpilot_df = convert_pings(
         sqlContext,
         get_doctype_pings("testpilot"),
         DataFrameConfig(
@@ -136,7 +76,7 @@ def __main__(sc, sqlContext, day=None, save=True):
     if save:
         save_df(testpilot_df, "testpilot", day)
 
-    testpilottest_df = pings_to_df(
+    testpilottest_df = convert_pings(
         sqlContext,
         get_doctype_pings("testpilottest"),
         DataFrameConfig(
@@ -176,7 +116,7 @@ def __main__(sc, sqlContext, day=None, save=True):
     to_bool = lambda x: try_convert(bool, x)
     to_int = lambda x: try_convert(int, x)
 
-    search_df = config_to_df(
+    search_df = convert_rdd(
         sqlContext,
         sqlContext.read.options(header=True) \
             .csv("s3://net-mozaws-prod-cliqz/testpilot-cliqz-telemetry.csv").rdd,
